@@ -154,6 +154,15 @@ module Gist
     end
     puts ""
 
+    File.open(auth_token_file, 'w') do |f|
+      f.write authorize_github(username, password, credentials[:otp])
+    end
+    puts "Success! #{ENV[URL_ENV_NAME] || "https://github.com/"}settings/applications"
+  rescue => e
+    raise e.extend Error
+  end
+
+  def authorize_github(username, password, otp = nil)
     request = Net::HTTP::Post.new("#{base_path}/authorizations")
     request.body = JSON.dump({
       :scopes => [:gist],
@@ -162,19 +171,18 @@ module Gist
     })
     request.content_type = 'application/json'
     request.basic_auth(username, password)
+    request.add_field('X-GitHub-OTP', otp) if otp
 
     response = http(api_url, request)
 
     if Net::HTTPCreated === response
-      File.open(auth_token_file, 'w') do |f|
-        f.write JSON.parse(response.body)['token']
-      end
-      puts "Success! #{ENV[URL_ENV_NAME] || "https://github.com/"}settings/applications"
+      JSON.parse(response.body)['token']
+    elsif Net::HTTPUnauthorized === response && response['x-github-otp'] && response['x-github-otp'].include?('required')
+      print "GitHub OTP Code: "
+      authorize_github(username, password, $stdin.gets.strip)
     else
       raise "Got #{response.class} from gist: #{response.body}"
     end
-  rescue => e
-    raise e.extend Error
   end
 
   # Return HTTP connection
